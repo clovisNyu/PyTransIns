@@ -1,0 +1,48 @@
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "pytransins"
+version = "1.0.0"
+description = "Python implementation of the TransIns EMNLP paper (see https://aclanthology.org/2021.emnlp-demo.4.pdf)"
+authors = ["Clovis Nyu"]
+readme = "README.md"
+packages = [{include = "pytransins"}]
+
+[tool.poetry.group.test.dependencies]
+pytest = "^7.1.2"
+pytest-mock = "^3.11.1"
+
+[tool.poetry.dependencies]
+python = "^3.8"
+bs4 = "^0.0.1"
+sacremoses = "^0.0.49"
+zss = "^1.2.0"
+
+[tool.isort]
+profile = "black"
+
+[tool.ruff]
+target-version = "py38"
+select = [
+    "E", # pycodestyle errors
+    "W", # pycodestyle warnings
+    "F", # pyflakes
+    "I", # isort
+    "C", # flake8-comprehensions
+    "B", # flake8-bubear
+    "D", # pydocstyle
+]
+ignore = [
+    "E501", # line too long, handled by black
+    "B008", # do not perform function calls in argument defaults
+    "C901", # too complex
+]
+
+[tool.ruff.pydocstyle]
+convention = "numpy"
+
+[tool.black]
+target-version = ["py38"]
+exclude = "__pycache__/*" 
