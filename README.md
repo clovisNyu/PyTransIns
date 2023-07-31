@@ -12,6 +12,11 @@ pip install poetry
 poetry build
 ```
 
+Or simply do 
+```bash
+pip install git+https://github.com/clovisNyu/PyTransIns.git
+```
+
 ## Usage
 
 ### Basic Flow
