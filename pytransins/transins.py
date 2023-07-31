@@ -397,7 +397,7 @@ class TransIns:
         if target:
             for i in range(len(tokens)):
                 if i not in self.tgt_tag_map:
-                    self.tgt_tag_map = []
+                    self.tgt_tag_map[i] = []
 
         self.tag_interpolate(target=target, interpolation_gap=interpolation_gap)
 
