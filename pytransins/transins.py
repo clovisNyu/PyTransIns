@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 from bs4.element import Comment, NavigableString, Tag
 
 from pytransins.tokenizer import MosesTokenizer, Tokenizer, TokenizerGroup
-from pytransins.utils import compare_markup, get_opening_tag
+from pytransins.utils import compare_markup, get_opening_tag, is_tag
 
 
 class TransIns:
@@ -98,6 +98,13 @@ class TransIns:
         token_buffer : List[str]
             A list containing the plaintext tokens extracted
         """
+        # Assign a tag ID to the tag
+        if not self.tag_id_map:
+            tag_id = 0
+
+        else:
+            tag_id = max(self.tag_id_map.keys()) + 1
+
         if (
             type(element) == NavigableString
         ):  # Text Node, without any child tags. No more markup to process.
@@ -105,7 +112,11 @@ class TransIns:
             return token_buffer
 
         elif type(element) == Comment:
-            # Do not handle comments
+            self.tag_id_map[tag_id] = f"<!-- {str(element)} -->"
+            if offset not in self.no_token_tags:
+                self.no_token_tags[offset] = []
+
+            self.no_token_tags[offset].append(tag_id)
             return []
 
         try:
@@ -117,18 +128,10 @@ class TransIns:
             )
             return []
 
-        # Assign a tag ID to the tag
-        if not self.tag_id_map:
-            tag_id = 0
-
-        else:
-            tag_id = max(self.tag_id_map.keys()) + 1
-
         self.tag_id_map[tag_id] = get_opening_tag(element)
 
         # Has children, but not any text nodes. Wrap entire element as 1, without further processing. Also include do not translate tags
         if (children and not element.text) or element.name in self.dnt:
-            # TODO: This does not acount for the case where a tag has
             self.tag_id_map[tag_id] += (
                 "".join(str(child) for child in children) + f"</{element.name}>"
             )
@@ -461,7 +464,11 @@ class TransIns:
                     continue
 
                 new_tag = self.tag_id_map[opening_tag_id]
-                if output_buffer and output_buffer[0] != " ":
+                if (
+                    output_buffer
+                    and output_buffer[-1] != " "
+                    and not is_tag(output_buffer[-1])
+                ):
                     output_buffer.append(" ")
 
                 output_buffer.append(new_tag)
@@ -475,7 +482,11 @@ class TransIns:
 
                 new_tag = self.tag_id_map[tag_id]
 
-                if output_buffer and output_buffer[0] != " ":
+                if (
+                    output_buffer
+                    and output_buffer[-1] != " "
+                    and not is_tag(output_buffer[-1])
+                ):
                     output_buffer.append(" ")
 
                 output_buffer.append(new_tag)
@@ -610,5 +621,5 @@ class TransIns:
 
 if __name__ == "__main__":
     test_transins = TransIns()
-    test_text = r"<h>TEST</h><script>for (var i=i; i<10; i++)\{console.log('test')\}</script><br /><p>this is <a>a</a> test <span><img src='' /></span></p>"
-    output = test_transins.test(test_text, to_log=["tokens", "tag_id_map"])
+    test_text = r"<h><!-- DO NOT TRANSLATE --><p>this is a <b>test</b></p></h>"
+    output = test_transins.test(test_text)

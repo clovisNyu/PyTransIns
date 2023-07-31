@@ -294,7 +294,7 @@ def test_transins_reinsert():
 
     assert (
         output
-        == '<h> <script>console.log("DO NOT TRANSLATE ME")</script>token0 <b>token1_bolded</b> token2 token3</h>'
+        == '<h><script>console.log("DO NOT TRANSLATE ME")</script>token0 <b>token1_bolded</b> token2 token3</h>'
     )
 
     # Test leftover tgt_no_token_tag
@@ -331,7 +331,7 @@ def test_transins_reinsert_source():
 
     assert (
         output
-        == '<h> <script>console.log("DO NOT TRANSLATE ME")</script>token0 <b>token1_bolded</b> token2 token3</h>'
+        == '<h><script>console.log("DO NOT TRANSLATE ME")</script>token0 <b>token1_bolded</b> token2 token3</h>'
     )
 
     # Test leftover no_token_tag

@@ -4,6 +4,11 @@ from bs4.element import Tag
 from zss import Node, simple_distance
 
 
+def is_tag(element: str) -> bool:
+    """Check if string provided is a markup tag."""
+    return element.startswith("<") and element.endswith(">")
+
+
 def get_opening_tag(element: Tag) -> str:
     """
     Convert a tag to the string representation of the opening tag.
