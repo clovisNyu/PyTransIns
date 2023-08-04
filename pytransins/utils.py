@@ -1,6 +1,8 @@
 """Set of utility functions to be used with the transins library."""
-from bs4 import BeautifulSoup
-from bs4.element import Tag
+from io import BytesIO
+
+from lxml import etree
+from lxml.etree import XMLParser, _Element
 from zss import Node, simple_distance
 
 
@@ -9,14 +11,14 @@ def is_tag(element: str) -> bool:
     return element.startswith("<") and element.endswith(">")
 
 
-def get_opening_tag(element: Tag) -> str:
+def get_opening_tag(element: _Element) -> str:
     """
     Convert a tag to the string representation of the opening tag.
 
     Parameters
     ----------
-    element : Tag
-        BeautifulSoup Tag element to convert
+    element : _Element
+        lxml _Element to convert
 
 
     Returns
@@ -24,25 +26,26 @@ def get_opening_tag(element: Tag) -> str:
     output : str
         Opening tag with attributes of the element provided.
     """
-    raw_attrs = {
-        k: v if not isinstance(v, list) else " ".join(v)
-        for k, v in element.attrs.items()
-    }
-    attrs = " ".join((f'{k}="{v}"' for k, v in raw_attrs.items()))
+    attrs = element.items()
+
     if attrs:
-        return f"<{element.name} {attrs}>"
-    else:
-        return f"<{element.name}>"
+        return (
+            f"<{element.tag} "
+            + " ".join(f"{key}={value}" for key, value in attrs)
+            + ">"
+        )
+
+    return f"<{element.tag}>"
 
 
-def _convert_to_nodes(element: Tag):
+def _convert_to_nodes(element: _Element):
     """
     Recursive conversion of Document Tree into a graph understood by zss library.
 
     Parameters
     ----------
-    element : Tag
-        BeautifulSoup Tag element to recurse down
+    element : _Element
+        lxml _Element element to recurse down
 
 
     Returns
@@ -51,7 +54,7 @@ def _convert_to_nodes(element: Tag):
         zss Node object that stores the subtree from the given element.
     """
     try:
-        children = element.contents
+        children = element.getchildren()
 
     except Exception:  # Unable to get children. Can happen for some tags like script.
         return Node("NULL", [])
@@ -78,8 +81,11 @@ def convert_to_nodes(markup: str) -> Node:
     tree : Node
         zss Node object that stores the entire tree.
     """
-    soup = BeautifulSoup(markup, "html.parser")
-    tree = _convert_to_nodes(soup)
+    parser = XMLParser(encoding="utf-8", recover=True)
+    root = etree.parse(BytesIO(markup.encode("utf-8")), parser=parser).getroot()
+
+    # soup = BeautifulSoup(markup, "html.parser")
+    tree = _convert_to_nodes(root)
     return tree
 
 

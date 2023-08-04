@@ -1,10 +1,12 @@
 """Module to handle markup extraction and reinsertion."""
 import logging
 from collections import OrderedDict
+from io import BytesIO
 from typing import List, Union
 
 from bs4 import BeautifulSoup
-from bs4.element import Comment, NavigableString, Tag
+from lxml import etree
+from lxml.etree import XMLParser, _Comment, _Element
 
 from pytransins.tokenizer import MosesTokenizer, Tokenizer, TokenizerGroup
 from pytransins.utils import compare_markup, get_opening_tag, is_tag
@@ -79,15 +81,17 @@ class TransIns:
         self.tgt_tokens = []
         self.tgt_no_token_tags = {}
 
+        self.xml_parser = XMLParser(encoding="utf-8", recover=True)
+
     def _extract_markup(
-        self, element: Tag, offset: int = 0, lang: str = "en"
+        self, element: _Element, offset: int = 0, lang: str = "en"
     ) -> List[str]:
         """
         Traverses down the document tree (depth first) from a given element to populate the tag_map and no_token_tags dictionaries.
 
         Parameters
         ----------
-        element : bs4.element.Tag
+        element : _Element
             The root element to start recursing down
         offset : int (default 0)
             An offset to keep track of how many tokens have been generated
@@ -105,14 +109,8 @@ class TransIns:
         else:
             tag_id = max(self.tag_id_map.keys()) + 1
 
-        if (
-            type(element) == NavigableString
-        ):  # Text Node, without any child tags. No more markup to process.
-            token_buffer = self.tokenizer.tokenize(element.text, lang=lang)
-            return token_buffer
-
-        elif type(element) == Comment:
-            self.tag_id_map[tag_id] = f"<!-- {str(element)} -->"
+        if type(element) == _Comment:
+            self.tag_id_map[tag_id] = str(element)
             if offset not in self.no_token_tags:
                 self.no_token_tags[offset] = []
 
@@ -120,7 +118,7 @@ class TransIns:
             return []
 
         try:
-            children = element.contents
+            children = element.getchildren()
 
         except Exception as exc:
             logging.warning(
@@ -130,49 +128,77 @@ class TransIns:
 
         self.tag_id_map[tag_id] = get_opening_tag(element)
 
-        # Has children, but not any text nodes. Wrap entire element as 1, without further processing. Also include do not translate tags
-        if (children and not element.text) or element.name in self.dnt:
-            self.tag_id_map[tag_id] += (
-                "".join(str(child) for child in children) + f"</{element.name}>"
-            )
+        # Do Not Translate tags. Wrap entire element as 1, without further processing.
+        if element.tag in self.dnt:
+            if element.tail:
+                self.tag_id_map[tag_id] = etree.tostring(element)[
+                    : -len(element.tail)
+                ].decode("utf-8")
+                tail_tokens = self.tokenizer.tokenize(element.tail, lang=lang)
+
+            else:
+                self.tag_id_map[tag_id] = etree.tostring(element).decode("utf-8")
+                tail_tokens = []
+
             if offset not in self.no_token_tags:
                 self.no_token_tags[offset] = []
 
             self.no_token_tags[offset].append(tag_id)
-            return []
+
+            return tail_tokens
+
+        if not children and (element.text or element.tail):
+            new_tokens = []
+            if element.text:
+                new_tokens = self.tokenizer.tokenize(element.text, lang=lang)
+
+            for i in range(offset, offset + len(new_tokens)):
+                if i not in self.tag_map:
+                    self.tag_map[i] = []
+
+                self.tag_map[i].append(tag_id)
+
+            if element.tail:
+                new_tokens.extend(self.tokenizer.tokenize(element.tail, lang=lang))
+
+            return new_tokens
 
         token_buffer = []
+
+        if element.text:
+            token_buffer.extend(self.tokenizer.tokenize(element.text, lang=lang))
 
         for child in children:
             child_tokens = self._extract_markup(
                 child, offset=offset + len(token_buffer)
             )  # Recurse over each child
 
-            # Assign each token a token id and map the tags
-            for i in range(
-                offset + len(token_buffer),
-                offset + len(token_buffer) + len(child_tokens),
-            ):
-                if i not in self.tag_map:
-                    self.tag_map[i] = []
-
-                self.tag_map[i].append(tag_id)
-
             token_buffer.extend(child_tokens)
+
+        # Assign each token a token id and map the tags
+        for i in range(offset, offset + len(token_buffer)):
+            if i not in self.tag_map:
+                self.tag_map[i] = []
+
+            self.tag_map[i].append(tag_id)
 
         if (
             not token_buffer
         ):  # All children did not return any tokens to tag to. Often occurs for self closing tags
-            if element.name in self.self_closing:
+            if element.tag in self.self_closing:
                 self.tag_id_map[tag_id] = self.tag_id_map[tag_id][:-1] + " />"
 
             else:
-                self.tag_id_map[tag_id] += f"</{element.name}>"
+                self.tag_id_map[tag_id] += f"</{element.tag}>"
 
             if offset not in self.no_token_tags:
                 self.no_token_tags[offset] = []
 
             self.no_token_tags[offset].append(tag_id)
+
+        if element.tail:
+            tail_tokens = self.tokenizer.tokenize(element.tail, lang=lang)
+            token_buffer.extend(tail_tokens)
 
         return token_buffer
 
@@ -194,9 +220,25 @@ class TransIns:
         if lang not in self.tokenizer.languages:
             raise TypeError(f"Tokenizer not able to handle language: {lang}")
 
-        soup = BeautifulSoup(raw, "html.parser")
-        self.tokens = self._extract_markup(soup, lang=lang)
-        del self.tag_id_map[0]  # Remove <[document]> tag inserted by BeautifulSoup
+        raw = f"<root>{raw}</root>"  # To ensure entire string has a root node.
+
+        # TODO: Find a better way to do this.
+        raw = str(
+            BeautifulSoup(raw, "html.parser")
+        )  # Take advantage of html.parser recovery as lxml recovery behaviour not ideal for this use case.
+
+        tree = etree.parse(BytesIO(raw.encode("utf-8")), parser=self.xml_parser)
+        root = tree.getroot()
+
+        self.tokens = self._extract_markup(root, lang=lang)
+        # Remove <root> tag inserted
+        del self.tag_id_map[0]
+        for tok_idx in range(len(self.tokens)):
+            if tok_idx not in self.tag_map:
+                self.tag_map[tok_idx] = []
+
+            if 0 in self.tag_map[tok_idx]:
+                self.tag_map[tok_idx].remove(0)
 
     def migrate_tags(self, alignments: List[tuple], threshold: float = 0.5) -> None:
         """
@@ -617,9 +659,3 @@ class TransIns:
         self.tgt_tag_map = {}
         self.tgt_tokens = []
         self.tgt_no_token_tags = {}
-
-
-if __name__ == "__main__":
-    test_transins = TransIns()
-    test_text = r"<h><!-- DO NOT TRANSLATE --><p>this is a <b>test</b></p></h>"
-    output = test_transins.test(test_text)
