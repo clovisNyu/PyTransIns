@@ -8,8 +8,7 @@ def test_convert_to_nodes():
     """Test for node conversion."""
     test_input = "<h>this is <b>a</b> test</h>"
     expected_graph = Node(
-        "<[document]>",
-        [Node("<h>", [Node("NULL"), Node("<b>", [Node("NULL")]), Node("NULL")])],
+        "<h>", [Node("NULL"), Node("<b>", [Node("NULL")]), Node("NULL")]
     )
     result = convert_to_nodes(test_input)
     assert str(result) == str(expected_graph)
@@ -18,11 +17,11 @@ def test_convert_to_nodes():
 def test_convert_to_nodes_faulty():
     """Test for faulty markup string."""
     test_input = "<h>some text"
-    expected_graph = Node("<[document]>", [Node("<h>", [Node("NULL")])])
+    expected_graph = Node("<h>", [Node("NULL")])
 
     result = convert_to_nodes(test_input)
 
-    assert result == expected_graph
+    assert str(result) == str(expected_graph)
 
 
 def test_compare_markup(mocker):

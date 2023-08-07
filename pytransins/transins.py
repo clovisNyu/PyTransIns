@@ -151,12 +151,22 @@ class TransIns:
             new_tokens = []
             if element.text:
                 new_tokens = self.tokenizer.tokenize(element.text, lang=lang)
+                for i in range(offset, offset + len(new_tokens)):
+                    if i not in self.tag_map:
+                        self.tag_map[i] = []
 
-            for i in range(offset, offset + len(new_tokens)):
-                if i not in self.tag_map:
-                    self.tag_map[i] = []
+                    self.tag_map[i].append(tag_id)
 
-                self.tag_map[i].append(tag_id)
+            else:  # Probably a self_closing element
+                if offset not in self.no_token_tags:
+                    self.no_token_tags[offset] = []
+
+                self.no_token_tags[offset].append(tag_id)
+                if element.tag not in self.self_closing:
+                    self.tag_id_map[tag_id] += f"</{element.tag}>"
+
+                if element.tag in self.self_closing:
+                    self.tag_id_map[tag_id] = self.tag_id_map[tag_id][:-1] + " />"
 
             if element.tail:
                 new_tokens.extend(self.tokenizer.tokenize(element.tail, lang=lang))

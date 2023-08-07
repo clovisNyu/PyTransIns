@@ -34,7 +34,7 @@ def test_transins_extract_markup_simple():
     transins.extract_markup(test_input)
 
     assert transins.tokens == ["this", "is", "a", "test"]
-    assert transins.tag_map == {0: [1, 0], 1: [1, 0], 2: [1, 0], 3: [1, 0]}
+    assert transins.tag_map == {0: [1], 1: [1], 2: [1], 3: [1]}
     assert transins.no_token_tags == {}
     assert transins.tag_id_map == {1: "<h>"}
 
@@ -47,7 +47,7 @@ def test_transins_extract_markup_self_closing():
     transins.extract_markup(test_input)
 
     assert transins.tokens == ["this", "is", "a", "test"]
-    assert transins.tag_map == {0: [1, 0], 1: [1, 0], 2: [1, 0], 3: [1, 0]}
+    assert transins.tag_map == {0: [1], 1: [1], 2: [1], 3: [1]}
     assert transins.no_token_tags == {2: [2], 3: [3]}
     assert transins.tag_id_map == {
         1: "<h>",
@@ -64,7 +64,7 @@ def test_transins_extract_markup_untagged_tokens():
     transins.extract_markup(test_input)
 
     assert transins.tokens == ["this", "is", "a", "test"]
-    assert transins.tag_map == {0: [1, 0], 1: [1, 0], 2: [1, 0], 3: [1, 0]}
+    assert transins.tag_map == {0: [1], 1: [1], 2: [1], 3: [1]}
     assert transins.no_token_tags == {3: [2]}
     assert transins.tag_id_map == {1: "<h>", 2: "<p></p>"}
 
@@ -78,7 +78,7 @@ def test_transins_extract_markup_dnt():
     transins.extract_markup(test_input)
 
     assert transins.tokens == ["this", "is", "a", "test"]
-    assert transins.tag_map == {0: [1, 0], 1: [1, 0], 2: [1, 0], 3: [1, 0]}
+    assert transins.tag_map == {0: [1], 1: [1], 2: [1], 3: [1]}
     assert transins.no_token_tags == {3: [2]}
     assert transins.tag_id_map == {
         1: "<h>",

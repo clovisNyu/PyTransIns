@@ -31,7 +31,7 @@ def get_opening_tag(element: _Element) -> str:
     if attrs:
         return (
             f"<{element.tag} "
-            + " ".join(f"{key}={value}" for key, value in attrs)
+            + " ".join(f'{key}="{value}"' for key, value in attrs)
             + ">"
         )
 
@@ -57,11 +57,20 @@ def _convert_to_nodes(element: _Element):
         children = element.getchildren()
 
     except Exception:  # Unable to get children. Can happen for some tags like script.
+        if element.text:
+            return Node(get_opening_tag(element), [Node("NULL", [])])
+
         return Node("NULL", [])
 
     sub_doc = []
+    if element.text:
+        sub_doc.append(Node("NULL", []))
+
     for child in children:
         sub_doc.append(_convert_to_nodes(child))
+
+        if child.tail:
+            sub_doc.append(Node("NULL", []))
 
     return Node(get_opening_tag(element), sub_doc)
 
@@ -84,7 +93,6 @@ def convert_to_nodes(markup: str) -> Node:
     parser = XMLParser(encoding="utf-8", recover=True)
     root = etree.parse(BytesIO(markup.encode("utf-8")), parser=parser).getroot()
 
-    # soup = BeautifulSoup(markup, "html.parser")
     tree = _convert_to_nodes(root)
     return tree
 
