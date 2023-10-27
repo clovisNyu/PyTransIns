@@ -26,6 +26,8 @@ class TransIns:
         -------
         None
         """
+
+        self.logger = logging.getLogger("pytransins")
         if tokenizer is None:
             tokenizer = MosesTokenizer()
 
@@ -38,7 +40,7 @@ class TransIns:
             tokenizer.detokenize(res)
 
         except Exception as exc:
-            logging.error(exc)
+            self.logger.error(exc)
             raise
 
         self.tokenizer = TokenizerGroup()
@@ -123,7 +125,7 @@ class TransIns:
             children = element.contents
 
         except Exception as exc:
-            logging.warning(
+            self.logger.warning(
                 f"Dropping tag as could not get children of non text node and non comment: {exc}"
             )
             return []
@@ -191,6 +193,7 @@ class TransIns:
         -------
         None
         """
+        self.logger.debug("BEGIN EXTRACTION PROCESS")
         if lang not in self.tokenizer.languages:
             raise TypeError(f"Tokenizer not able to handle language: {lang}")
 
@@ -198,7 +201,7 @@ class TransIns:
         self.tokens = self._extract_markup(soup, lang=lang)
         del self.tag_id_map[0]  # Remove <[document]> tag inserted by BeautifulSoup
 
-    def migrate_tags(self, alignments: List[tuple], threshold: float = 0.5) -> None:
+    def migrate_tags(self, alignments: List[tuple], threshold: float = 0.5, force_migrate: bool = False) -> None:
         """
         Migrates the tag map to target tokens based on provided alignments. Target alignments stored in tgt_tag_map and tgt_no_token_tags attributes.
 
@@ -208,42 +211,61 @@ class TransIns:
             List of tuples where each tuple contains, in order, the source token index, the target token index, and the score for that alignment
         threshold : float (default 0.5)
             Threshold for algorithm to accept the alignment.
+        force_migrate: bool (default False)
+            Forces tags in source to migrate to target regardless of threshold set.
 
 
         Returns
         -------
         None
         """
+        self.logger.debug("BEGIN TAG MIGRATION")
         if not self.tag_map:
-            logging.warning("No tag map found! Did you run extract_markup already?")
+            self.logger.warning("No tag map found! Did you run extract_markup already?")
 
         untagged_ids = list(
             self.no_token_tags.keys()
         )  # Keep track of which tokens have no_token_tags mapped but were not migrated. Only done for tags without tokens as tag interpolation will not be able to deal with them.
 
+        secondary_alignment = []
+        unmigrated_tag_ids = self.tag_id_map.keys()
+
         for src_idx, tgt_idx, score in alignments:
             if score < threshold:
+                self.logger.debug(f"{src_idx} TO {tgt_idx} SKIPPED, BELOW THRESHOLD")
+                secondary_alignment.append((src_idx, tgt_idx, score))
                 continue
 
+            self.logger.debug(f"{src_idx} MAPPED TO {tgt_idx}")
             if src_idx in self.tag_map:
                 if tgt_idx not in self.tgt_tag_map:
                     self.tgt_tag_map[tgt_idx] = []
 
                 self.tgt_tag_map[tgt_idx].extend(self.tag_map[src_idx])
+                unmigrated_tag_ids = [tag for tag in unmigrated_tag_ids if tag not in self.tag_map[src_idx]]
 
             if src_idx in self.no_token_tags:
+                self.logger.debug(f"NO-TOKEN-TAGS FOUND FOR SOURCE INDEX {src_idx}")
                 if tgt_idx not in self.tgt_no_token_tags:
                     self.tgt_no_token_tags[tgt_idx] = []
 
                 self.tgt_no_token_tags[tgt_idx].extend(self.no_token_tags[src_idx])
+                unmigrated_tag_ids = [tag for tag in unmigrated_tag_ids if tag not in self.no_token_tags[src_idx]]
                 if src_idx in untagged_ids:
                     untagged_ids.remove(src_idx)
+        
 
-        available_sources = {src_idx: tgt_idx for src_idx, tgt_idx, _ in alignments}
+        available_sources = {src_idx: tgt_idx for src_idx, tgt_idx, _ in alignments} # Dropping scores and restructuring as dict.
 
         # Migrate no_token_tags to nearest token
+        if untagged_ids:
+            self.logger.debug("NO-TOKEN-TAGS FAILED TO MIGRATE")
+            self.logger.debug("APPROXIMATING TO NEAREST TOKEN")
 
         for untagged_id in untagged_ids:
+            if untagged_id in unmigrated_tag_ids:
+                unmigrated_tag_ids.remove(untagged_id)
+
             available_candidates = [
                 src_idx for src_idx in available_sources if src_idx >= untagged_id
             ]
@@ -258,8 +280,8 @@ class TransIns:
                 not available_candidates
             ):  # If there are no alignments for any tags more than equal to, or less than untagged (empty alignment)
                 self.tgt_no_token_tags[0] = self.no_token_tags[untagged_id]
-                logging.warning(
-                    f"Unable to map tag ID with no tokens from source {untagged_id}. Assigning tags to first token to avoid dropping. Check if alignment is correct!"
+                self.logger.warning(
+                    f"UNABLE TO MAP TAG ID WITH NO TOKENS FROM SOURCE {untagged_id}. ASSIGNING TAGS TO FIRST TOKEN TO AVOID DROPPING. CHECK IF ALIGNMENT IS CORRECT!"
                 )
 
                 continue
@@ -270,10 +292,29 @@ class TransIns:
                 else max(available_candidates)
             )
             tgt_idx = available_sources[closest]
+            self.logger.debug(f"ASSIGNING NO-TOKEN-TAG ID {untagged_id} TO TOKEN INDEX {tgt_idx}")
             if closest not in self.tgt_no_token_tags:
                 self.tgt_no_token_tags[closest] = []
 
             self.tgt_no_token_tags[closest].extend(self.no_token_tags[untagged_id])
+        
+        if unmigrated_tag_ids:
+            if not force_migrate:
+                self.logger.warning("UNMIGRATED TAGS FOUND! IS YOUR THRESHOLD TOO HIGH?")
+            
+            else:
+                # NOTE: UNTESTED. UNSURE OF HOW WELL THIS PERFORMS.
+                self.logger.debug("FORCE MIGRATING TAGS")
+                for src_idx, tgt_idx, _ in secondary_alignment:
+                    tags = self.tag_map[src_idx]
+                    shared = set(tags).intersection(set(unmigrated_tag_ids))
+                    if not shared:
+                        continue
+
+                    if tgt_idx not in self.tgt_tag_map:
+                        self.tgt_tag_map[tgt_idx] = []
+
+                    self.tgt_tag_map[tgt_idx].extend(shared)
 
         # Remove duplicates
         for key in self.tgt_tag_map:
@@ -304,7 +345,7 @@ class TransIns:
             to_interpolate = self.tag_map
 
         if not to_interpolate:
-            logging.warn("No entries in tag map! Nothing to interpolate!")
+            self.logger.warn("NO ENTRIES IN TAG MAP! NOTHING TO INTERPOLATE!")
             return
 
         to_interpolate = dict(OrderedDict(sorted(to_interpolate.items())))
@@ -317,8 +358,8 @@ class TransIns:
             if (
                 token_idx != token_idx_checker + 1
             ):  # Case should be handled when calling from reinsert_markup method. Not guaranteed when calling directly.
-                logging.warning(
-                    f"Missing token index {token_idx_checker + 1}! Assign an empty list to interpolate!"
+                self.logger.warning(
+                    f"MISSING TOKEN INDEX {token_idx_checker + 1}! ASSIGN AN EMPTY LIST TO INTERPOLATE!"
                 )
 
             token_idx_checker = token_idx
@@ -389,9 +430,9 @@ class TransIns:
         if not tokens:
             raise TypeError("No tokens to migrate to!")
 
-        if (not self.tgt_tag_map or not self.tgt_no_token_tags) and (target):
-            logging.warning(
-                "Either tag_map or no_token_tags empty for target. Did you run migrate_tags?"
+        if (not self.tgt_tag_map) and (target):
+            self.logger.warning(
+                "TAG_MAP EMPTY FOR TARGET. DID YOU RUN MIGRATE_TAGS?"
             )
 
         if target:
@@ -414,9 +455,6 @@ class TransIns:
         _output_buffer = []  # To hold list of tokens for detokenizing
 
         for token_idx, token in enumerate(tokens):
-            # TODO: Handle ordering of tag insertion.
-            # Currently, order is hardcoded as close, open, no_token_tags.
-            # close then open is more or less guaranteed by XML structure, but no_token_tags position is not captured.
             new_tags = to_reinsert[token_idx]
 
             opening = [tag for tag in new_tags if tag not in active_tags]
@@ -430,17 +468,22 @@ class TransIns:
             else:
                 no_tokens = []
 
-            if opening or closing or no_tokens:
+            if opening or closing or no_tokens: # There exist some change in tags, clear the string buffer.
                 if _output_buffer:
                     output_buffer.append(
                         self.tokenizer.detokenize(_output_buffer, lang=lang)
                     )
                     _output_buffer = []
 
-            for closing_tag_id in closing:
+            # Information on ordering of no-token-tags and closing tags are not captured. 
+            # Hard coded to insert no-token-tags after closing.
+            for closing_tag_id in closing: # First In Last Out structure of XML dictates that closing tags must be inserted first.
                 active_tags.remove(closing_tag_id)
+                if closing_tag_id == 0: # BeautifulSoup inserted tag
+                    continue
+
                 if closing_tag_id not in self.tag_id_map:
-                    logging.warning(
+                    self.logger.warning(
                         f"Tag ID {closing_tag_id} NOT FOUND WHEN CLOSING! SKIPPING!"
                     )
                     continue
@@ -456,12 +499,15 @@ class TransIns:
                 output_buffer.append(" ")
 
             for opening_tag_id in opening:
-                active_tags.append(opening_tag_id)
+                if opening_tag_id == 0:
+                    continue
+
                 if opening_tag_id not in self.tag_id_map:
-                    logging.warning(
+                    self.logger.warning(
                         f"Tag ID {opening_tag_id} NOT FOUND WHEN OPENING! SKIPPING!"
                     )
                     continue
+                active_tags.append(opening_tag_id)
 
                 new_tag = self.tag_id_map[opening_tag_id]
                 if (
@@ -471,11 +517,19 @@ class TransIns:
                 ):
                     output_buffer.append(" ")
 
+                # Handle order of insertion of no-token-tags by tag ID.
+                _no_tokens = [tag_id for tag_id in no_tokens if tag_id < opening_tag_id]
+                for tag_id in _no_tokens:
+                    _new_tag = self.tag_id_map[tag_id]
+                    output_buffer.append(_new_tag)
+                
+                no_tokens = [tag_id for tag_id in no_tokens if tag_id not in _no_tokens]
+
                 output_buffer.append(new_tag)
 
             for tag_id in no_tokens:
                 if tag_id not in self.tag_id_map:
-                    logging.warning(
+                    self.logger.warning(
                         f"Tag ID {tag_id} NOT FOUND WHEN SELF CLOSING! SKIPPING!"
                     )
                     continue
@@ -502,11 +556,12 @@ class TransIns:
 
         # Close buffers.
         if active_tags:
-            logging.warning("STRAY ACTIVE TAGS FOUND! CLOSING!")
-
             for tag_id in reversed(active_tags):
+                if tag_id == 0:
+                    continue
+
                 if tag_id not in self.tag_id_map:
-                    logging.warning(
+                    self.logger.warning(
                         f"Tag ID {tag_id} NOT FOUND WHEN CLOSING! SKIPPING!"
                     )
                     continue
@@ -589,7 +644,7 @@ class TransIns:
             + "\n\n-----------------------------------\n\n"
         )
 
-        logging.info(log_string)
+        self.logger.info(log_string)
         logging.basicConfig(level=logging.WARNING)
         self.reset()
         return output
@@ -621,5 +676,5 @@ class TransIns:
 
 if __name__ == "__main__":
     test_transins = TransIns()
-    test_text = r"<h><!-- DO NOT TRANSLATE --><p>this is a <b>test</b></p></h>"
+    test_text = r"<h><p>this is a</p> <p><b><!-- DO NOT TRANSLATE -->test</b></p></h>"
     output = test_transins.test(test_text)
